@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Processor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .drop-zone {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        .drop-zone.dragover {
+            background-color: #e1e1e1;
+            border-color: #999;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        .result-item {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        .success { background-color: #e6ffe6; }
+        .error { background-color: #ffe6e6; }
+        .download-links {
+            margin-top: 10px;
+        }
+        .download-link {
+            display: inline-block;
+            margin-right: 15px;
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+        }
+        .download-link:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Audio Processor</h1>
+
+    <div class="drop-zone" id="dropZone">
+        <p>Drag and drop audio files here or click to select files</p>
+        <input type="file" id="fileInput" multiple accept=".wav,.mp3" style="display: none;">
+    </div>
+
+    <div id="progress" style="display: none;">
+        <p>Processing files... Please wait.</p>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        function escapeHtml(unsafe) {
+            if (!unsafe) return '';
+            return unsafe
+                .toString()
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function createElementFromHTML(htmlString) {
+            const div = document.createElement('div');
+            div.innerHTML = htmlString.trim();
+            return div.firstChild;
+        }
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const progress = document.getElementById('progress');
+        const results = document.getElementById('results');
+
+        // Handle drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            const formData = new FormData();
+            for (const file of files) {
+                formData.append('files[]', file);
+            }
+
+            progress.style.display = 'block';
+            results.innerHTML = '';
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                progress.style.display = 'none';
+                if (data && data.results) {
+                    displayResults(data.results);
+                } else if (data && data.error) {
+                    throw new Error(data.error);
+                } else {
+                    throw new Error('Invalid server response format');
+                }
+            })
+            .catch(error => {
+                progress.style.display = 'none';
+                results.innerHTML = `
+                    <div class="result-item error">
+                        <p>Error: ${escapeHtml(error.message)}</p>
+                    </div>
+                `;
+            });
+        }
+
+        function displayResults(resultList) {
+            if (!Array.isArray(resultList)) {
+                console.error('Expected array of results, got:', resultList);
+                results.innerHTML = `
+                    <div class="result-item error">
+                        <p>Error: Invalid response format from server</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const resultsDiv = document.getElementById('results');
+            resultList.forEach(result => {
+                if (!result || typeof result !== 'object') {
+                    console.error('Invalid result item:', result);
+                    return;
+                }
+
+                let htmlContent;
+                try {
+                    if (result.status === 'success' && result.outputs) {
+                        htmlContent = `
+                            <div class="result-item success">
+                                <p>Successfully processed: ${escapeHtml(result.filename || 'Unknown file')}</p>
+                                <div class="download-links">
+                                    <a href="/download/${encodeURIComponent(result.outputs.wav)}" class="download-link" download>Download WAV</a>
+                                    <a href="/download/${encodeURIComponent(result.outputs.mp3)}" class="download-link" download>Download MP3</a>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        htmlContent = `
+                            <div class="result-item error">
+                                <p>Error processing: ${escapeHtml(result.filename || 'Unknown file')}</p>
+                                <p>Error: ${escapeHtml(result.error || 'Unknown error')}</p>
+                            </div>
+                        `;
+                    }
+                    const element = createElementFromHTML(htmlContent);
+                    resultsDiv.appendChild(element);
+                } catch (err) {
+                    console.error('Error displaying result:', err);
+                    resultsDiv.appendChild(createElementFromHTML(`
+                        <div class="result-item error">
+                            <p>Error displaying result</p>
+                        </div>
+                    `));
+                }
+            });
+        }
+    </script>
+</body>
+</html>
